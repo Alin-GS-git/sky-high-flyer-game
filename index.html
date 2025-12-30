@@ -3,113 +3,326 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sky Dodger - Aeroplane Game</title>
+    <title>Skybound: Endless Flyer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: Arial, sans-serif; }
-        #game-container { position: relative; width: 100vw; height: 100vh; background: linear-gradient(#1a2a6c, #b21f1f, #fdbb2d); }
-        #player { position: absolute; width: 60px; height: 30px; background: #fff; border-radius: 5px; transition: transform 0.1s; z-index: 10; }
-        /* Simple Airplane Shape */
-        #player::after { content: ''; position: absolute; width: 20px; height: 40px; background: #ddd; top: -5px; left: 20px; border-radius: 3px; }
-        .obstacle { position: absolute; border-radius: 5px; }
-        #score { position: absolute; top: 20px; left: 20px; color: white; font-size: 24px; font-weight: bold; }
-        #ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; }
-        button { padding: 10px 20px; font-size: 20px; cursor: pointer; background: #fff; border: none; border-radius: 5px; }
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #0c4a6e;
+        }
+        .font-bungee {
+            font-family: 'Bungee', cursive;
+        }
+        @keyframes scroll-bg {
+            from { background-position: 0 0; }
+            to { background-position: -1000px 0; }
+        }
+        .scrolling-sky {
+            background-image: linear-gradient(to bottom, #7dd3fc, #38bdf8);
+            background-size: 1000px 100%;
+            animation: scroll-bg 20s linear infinite;
+        }
+        /* Custom transitions for smoother game elements */
+        .game-transition {
+            transition: transform 0.05s linear;
+        }
     </style>
+    <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+        "react-dom": "https://esm.sh/react-dom@^19.2.3",
+        "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
+        "react": "https://esm.sh/react@^19.2.3"
+      }
+    }
+    </script>
 </head>
 <body>
-    <div id="game-container">
-        <div id="score">Score: 0</div>
-        <div id="player"></div>
-        <div id="ui">
-            <h1>SKY DODGER</h1>
-            <button onclick="startGame()">Start Flight</button>
-        </div>
-    </div>
+    <div id="root"></div>
 
-    <script>
-        const player = document.getElementById('player');
-        const container = document.getElementById('game-container');
-        const scoreElement = document.getElementById('score');
-        const ui = document.getElementById('ui');
+    <script type="module">
+        import React, { useState, useEffect, useRef, useCallback } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { GoogleGenAI } from "@google/genai";
 
-        let playerY = window.innerHeight / 2;
-        let score = 0;
-        let gameActive = false;
-        let obstacles = [];
-        let speed = 5;
+        // --- CONSTANTS ---
+        const GRAVITY = 0.4;
+        const LIFT = -7.5;
+        const PLANE_WIDTH = 80;
+        const PLANE_HEIGHT = 50;
+        const SPAWN_RATE = 1500;
+        const PLANE_X = 100;
 
-        // Move player with Mouse or Touch
-        window.addEventListener('mousemove', (e) => {
-            if(gameActive) playerY = e.clientY;
-        });
+        // --- TYPES & ENUMS ---
+        const ObstacleType = {
+            CLOUD: 'CLOUD',
+            BIRD: 'BIRD',
+            BALLOON: 'BALLOON',
+            SATELLITE: 'SATELLITE'
+        };
 
-        function startGame() {
-            score = 0;
-            obstacles.forEach(obs => obs.element.remove());
-            obstacles = [];
-            gameActive = true;
-            ui.style.display = 'none';
-            requestAnimationFrame(update);
+        // --- SERVICES ---
+        const ai = new GoogleGenAI({ apiKey: "YOUR_API_KEY_HERE" }); // Injected via env in reality
+
+        async function getFlightDebrief(score, lastObstacle) {
+            try {
+                // Note: process.env.API_KEY is handled by the platform
+                const genAI = new GoogleGenAI({ apiKey: window.process?.env?.API_KEY || '' });
+                const response = await genAI.models.generateContent({
+                    model: 'gemini-3-flash-preview',
+                    contents: `Generate a short, funny pilot debrief for crashing into a ${lastObstacle}. Score: ${score}. Use aviation slang. Under 25 words.`,
+                    config: { temperature: 0.7 }
+                });
+                return response.text || "Mayday! Watch your altitude next time, Captain.";
+            } catch (e) {
+                return "Black box data corrupted. Fly better next time!";
+            }
         }
 
-        function spawnObstacle() {
-            const types = [
-                { color: 'white', w: 80, h: 40, name: 'Cloud' },
-                { color: 'red', w: 30, h: 20, name: 'Bird' },
-                { color: 'purple', w: 40, h: 40, name: 'Satellite' }
-            ];
-            const type = types[Math.floor(Math.random() * types.length)];
-            const el = document.createElement('div');
-            el.className = 'obstacle';
-            el.style.backgroundColor = type.color;
-            el.style.width = type.w + 'px';
-            el.style.height = type.h + 'px';
-            
-            const startY = Math.random() * (window.innerHeight - 50);
-            container.appendChild(el);
-            obstacles.push({ element: el, x: window.innerWidth, y: startY, w: type.w, h: type.h });
-        }
+        // --- COMPONENTS ---
 
-        let frame = 0;
-        function update() {
-            if(!gameActive) return;
-
-            // Player position
-            player.style.top = playerY + 'px';
-            player.style.left = '50px';
-
-            // Spawn obstacles
-            if(frame++ % 60 === 0) spawnObstacle();
-
-            // Move obstacles
-            obstacles.forEach((obs, index) => {
-                obs.x -= speed;
-                obs.element.style.left = obs.x + 'px';
-                obs.element.style.top = obs.y + 'px';
-
-                // Collision detection
-                if (obs.x < 110 && obs.x > 50 && 
-                    playerY < obs.y + obs.h && playerY + 30 > obs.y) {
-                    gameOver();
+        const ObstacleRenderer = ({ obstacle }) => {
+            const getIcon = () => {
+                switch (obstacle.type) {
+                    case ObstacleType.CLOUD:
+                        return React.createElement('svg', { viewBox: "0 0 24 24", fill: "white", className: "w-full h-full drop-shadow-md" },
+                            React.createElement('path', { d: "M17.5,19c-3.037,0-5.5-2.463-5.5-5.5c0-0.007,0-0.013,0-0.02c-0.165,0.013-0.331,0.02-0.5,0.02c-2.485,0-4.5-2.015-4.5-4.5c0-0.065,0.003-0.13,0.008-0.194C5.034,8.552,3,6.516,3,4c0-2.209,1.791-4,4-4c0.169,0,0.334,0.011,0.496,0.031C8.24,0.011,8.369,0,8.5,0c2.485,0,4.5,2.015,4.5,4.5c0,0.065-0.003,0.13-0.008,0.194C14.966,4.448,17,6.484,17,9c0,2.209-1.791,4-4,4c-0.169,0-0.334-0.011-0.496-0.031C11.76,12.989,11.631,13,11.5,13c-2.485,0-4.5-2.015-4.5-4.5c0-0.065,0.003-0.13,0.008-0.194C5.034,8.552,3,6.516,3,4c0-2.209,1.791-4,4-4c0.169,0,0.334,0.011,0.496,0.031z" })
+                        );
+                    case ObstacleType.BIRD:
+                        return React.createElement('svg', { viewBox: "0 0 24 24", fill: "#1e293b", className: "w-full h-full animate-bounce" },
+                            React.createElement('path', { d: "M21,12.22l-4.74,0c-0.1,0-0.18,0.06-0.21,0.15l-1.05,2.78l-2.01-6.19c-0.03-0.09-0.11-0.15-0.21-0.15s-0.18,0.06-0.21,0.15l-2.01,6.19l-1.05-2.78c-0.03-0.09-0.11-0.15-0.21-0.15l-4.74,0C4.21,12.22,4,12.43,4,12.69s0.21,0.47,0.47,0.47l4.33,0l1.37,3.63c0.03,0.09,0.11,0.15,0.21,0.15s0.18-0.06,0.21-0.15l2.01-6.19l2.01,6.19c0.03,0.09,0.11,0.15,0.21,0.15s0.18-0.06,0.21-0.15l1.37-3.63l4.33,0c0.26,0,0.47-0.21,0.47-0.47S21.26,12.22,21,12.22z" })
+                        );
+                    case ObstacleType.BALLOON:
+                        return React.createElement('svg', { viewBox: "0 0 24 24", fill: "#f43f5e", className: "w-full h-full" },
+                            React.createElement('path', { d: "M12,2C8.13,2,5,5.13,5,9c0,5.25,7,13,7,13s7-7.75,7-13C19,5.13,15.87,2,12,2z" }),
+                            React.createElement('path', { d: "M11,22 L13,22 L12,24 z", fill: "#fbbf24" })
+                        );
+                    case ObstacleType.SATELLITE:
+                        return React.createElement('svg', { viewBox: "0 0 24 24", fill: "#64748b", className: "w-full h-full" },
+                            React.createElement('rect', { x: "6", y: "8", width: "12", height: "8", rx: "1" }),
+                            React.createElement('circle', { cx: "12", cy: "3", r: "1.5" })
+                        );
+                    default: return null;
                 }
+            };
 
-                // Point scoring
-                if(obs.x < 0) {
-                    score++;
-                    scoreElement.innerText = `Score: ${score}`;
-                    obs.element.remove();
-                    obstacles.splice(index, 1);
+            return React.createElement('div', {
+                className: "absolute game-transition",
+                style: {
+                    left: `${obstacle.x}px`,
+                    top: `${obstacle.y}px`,
+                    width: `${obstacle.width}px`,
+                    height: `${obstacle.height}px`,
+                    transform: `rotate(${obstacle.angle}deg)`
                 }
-            });
+            }, getIcon());
+        };
 
-            requestAnimationFrame(update);
-        }
+        const App = () => {
+            const [status, setStatus] = useState('START');
+            const [score, setScore] = useState(0);
+            const [highScore, setHighScore] = useState(parseInt(localStorage.getItem('highScore') || '0'));
+            const [planeY, setPlaneY] = useState(window.innerHeight / 2);
+            const [planeVelocity, setPlaneVelocity] = useState(0);
+            const [obstacles, setObstacles] = useState([]);
+            const [debrief, setDebrief] = useState('');
+            const [loadingDebrief, setLoadingDebrief] = useState(false);
 
-        function gameOver() {
-            gameActive = false;
-            ui.style.display = 'block';
-            ui.innerHTML = `<h1>CRASHED!</h1><p>Final Score: ${score}</p><button onclick="startGame()">Try Again</button>`;
-        }
+            const planeYRef = useRef(window.innerHeight / 2);
+            const planeVelocityRef = useRef(0);
+            const obstaclesRef = useRef([]);
+            const spawnTimerRef = useRef(0);
+            const requestRef = useRef();
+
+            const startGame = () => {
+                setStatus('PLAYING');
+                setScore(0);
+                setDebrief('');
+                planeYRef.current = window.innerHeight / 2;
+                planeVelocityRef.current = 0;
+                obstaclesRef.current = [];
+                spawnTimerRef.current = 0;
+                setObstacles([]);
+            };
+
+            const jump = useCallback(() => {
+                if (status === 'PLAYING') {
+                    planeVelocityRef.current = LIFT;
+                } else if (status === 'START' || (status === 'GAMEOVER' && !loadingDebrief)) {
+                    startGame();
+                }
+            }, [status, loadingDebrief]);
+
+            const endGame = async (type) => {
+                setStatus('GAMEOVER');
+                setLoadingDebrief(true);
+                const result = await getFlightDebrief(score, type);
+                setDebrief(result);
+                setLoadingDebrief(false);
+            };
+
+            const update = useCallback((time) => {
+                if (status === 'PLAYING') {
+                    // Physics
+                    planeVelocityRef.current += GRAVITY;
+                    planeYRef.current += planeVelocityRef.current;
+
+                    // Bounds
+                    if (planeYRef.current < 0 || planeYRef.current > window.innerHeight - PLANE_HEIGHT) {
+                        endGame('Ground/Atmosphere');
+                    }
+
+                    // Obstacles Spawning
+                    spawnTimerRef.current += 16;
+                    if (spawnTimerRef.current > SPAWN_RATE) {
+                        spawnTimerRef.current = 0;
+                        const types = Object.keys(ObstacleType);
+                        const type = types[Math.floor(Math.random() * types.length)];
+                        let width = 60, height = 60, vx = -5, vy = 0;
+                        
+                        if (type === ObstacleType.CLOUD) { width = 140; height = 80; vx = -3; }
+                        if (type === ObstacleType.BIRD) { vx = -10; }
+                        if (type === ObstacleType.SATELLITE) { vy = 2; vx = -6; }
+
+                        obstaclesRef.current.push({
+                            id: Date.now(),
+                            type,
+                            x: window.innerWidth,
+                            y: Math.random() * (window.innerHeight - 150) + 75,
+                            width, height, vx, vy, angle: 0, passed: false
+                        });
+                    }
+
+                    // Collision & Movement
+                    const nextObstacles = [];
+                    let scoreBonus = 0;
+                    let hitType = null;
+
+                    for (const obs of obstaclesRef.current) {
+                        obs.x += obs.vx;
+                        obs.y += obs.vy;
+                        
+                        if (obs.type === ObstacleType.BALLOON) {
+                            obs.y += Math.sin(time / 200) * 3;
+                        }
+                        if (obs.type === ObstacleType.BIRD) {
+                            obs.angle = Math.sin(time / 100) * 15;
+                        }
+
+                        // Pass check
+                        if (!obs.passed && obs.x + obs.width < PLANE_X) {
+                            obs.passed = true;
+                            scoreBonus += 1;
+                        }
+
+                        // Collision check
+                        const pRect = { left: PLANE_X + 10, right: PLANE_X + PLANE_WIDTH - 10, top: planeYRef.current + 10, bottom: planeYRef.current + PLANE_HEIGHT - 10 };
+                        const oRect = { left: obs.x + 5, right: obs.x + obs.width - 5, top: obs.y + 5, bottom: obs.y + obs.height - 5 };
+
+                        if (pRect.left < oRect.right && pRect.right > oRect.left && pRect.top < oRect.bottom && pRect.bottom > oRect.top) {
+                            hitType = obs.type;
+                        }
+
+                        if (obs.x > -200) nextObstacles.push(obs);
+                    }
+
+                    if (hitType) {
+                        endGame(hitType);
+                    }
+
+                    obstaclesRef.current = nextObstacles;
+                    setObstacles([...obstaclesRef.current]);
+                    setPlaneY(planeYRef.current);
+                    setPlaneVelocity(planeVelocityRef.current);
+                    if (scoreBonus > 0) setScore(s => s + scoreBonus);
+                }
+                requestRef.current = requestAnimationFrame(update);
+            }, [status, score]);
+
+            useEffect(() => {
+                requestRef.current = requestAnimationFrame(update);
+                return () => cancelAnimationFrame(requestRef.current);
+            }, [update]);
+
+            useEffect(() => {
+                const handleKeyDown = (e) => e.code === 'Space' && jump();
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [jump]);
+
+            useEffect(() => {
+                if (score > highScore) {
+                    setHighScore(score);
+                    localStorage.setItem('highScore', score.toString());
+                }
+            }, [score, highScore]);
+
+            return React.createElement('div', { 
+                className: "relative w-screen h-screen scrolling-sky overflow-hidden select-none cursor-pointer",
+                onClick: jump
+            },
+                // Header
+                React.createElement('div', { className: "absolute top-8 left-0 right-0 z-20 flex justify-between px-8" },
+                    React.createElement('div', { className: "bg-white/20 backdrop-blur-md px-6 py-2 rounded-full border border-white/30" },
+                        React.createElement('p', { className: "font-bungee text-white text-3xl" }, `Score: ${score}`)
+                    ),
+                    React.createElement('div', { className: "bg-black/20 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 text-right" },
+                        React.createElement('p', { className: "text-white/70 text-xs font-bold uppercase" }, "Best"),
+                        React.createElement('p', { className: "font-bungee text-white text-xl" }, highScore)
+                    )
+                ),
+
+                // Plane
+                React.createElement('div', {
+                    className: "absolute z-10 game-transition",
+                    style: {
+                        left: `${PLANE_X}px`,
+                        top: `${planeY}px`,
+                        width: `${PLANE_WIDTH}px`,
+                        height: `${PLANE_HEIGHT}px`,
+                        transform: `rotate(${Math.max(-25, Math.min(25, planeVelocity * 4))}deg)`
+                    }
+                },
+                    React.createElement('svg', { viewBox: "0 0 24 24", className: "w-full h-full drop-shadow-xl" },
+                        React.createElement('path', { fill: "#f8fafc", d: "M21,16.5c0-0.8-0.7-1.5-1.5-1.5h-5.4l-4.5-9L8.4,6h2.1l3,6h1.5l-3-6H9.6L6.9,6H5.4C4.6,6,4,6.7,4,7.5S4.6,9,5.4,9h1.5l1.5,3H3.9 C3.4,12,3,12.4,3,13s0.4,1,1,1h4.5l1.5,3h1.5l-1.5-3h1.5l1.5,3h1.5l-1.5-3h4.5c0.8,0,1.5,0.7,1.5,1.5s-0.7,1.5-1.5,1.5h-4.5l-1.5,3 h-1.5l1.5-3h-1.5l-1.5,3h-1.5l1.5-3H4c-0.6,0-1,0.4-1,1s0.4,1,1,1h15.6C20.3,18,21,17.3,21,16.5z" })
+                    ),
+                    React.createElement('div', { className: "absolute -left-4 top-1/2 w-8 h-2 bg-white/40 blur-sm rounded-full animate-pulse" })
+                ),
+
+                // Obstacles
+                obstacles.map(obs => React.createElement(ObstacleRenderer, { key: obs.id, obstacle: obs })),
+
+                // Overlays
+                status === 'START' && React.createElement('div', { className: "absolute inset-0 bg-sky-900/60 backdrop-blur-sm z-50 flex items-center justify-center text-center p-6" },
+                    React.createElement('div', { className: "max-w-md w-full" },
+                        React.createElement('h1', { className: "font-bungee text-7xl text-white mb-4" }, "SKYBOUND"),
+                        React.createElement('button', { className: "bg-white text-sky-900 font-bungee text-2xl px-12 py-4 rounded-2xl shadow-xl transform active:scale-95 transition-all" }, "LAUNCH")
+                    )
+                ),
+
+                status === 'GAMEOVER' && React.createElement('div', { className: "absolute inset-0 bg-red-950/70 backdrop-blur-md z-50 flex items-center justify-center text-center p-6" },
+                    React.createElement('div', { className: "max-w-md w-full" },
+                        React.createElement('h2', { className: "font-bungee text-6xl text-white mb-2" }, "MAYDAY!"),
+                        React.createElement('div', { className: "bg-white/10 p-6 rounded-3xl mb-8 border border-white/10" },
+                            loadingDebrief ? 
+                                React.createElement('div', { className: "w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto" }) :
+                                React.createElement('p', { className: "text-xl font-medium text-white italic" }, `"${debrief}"`)
+                        ),
+                        React.createElement('button', { 
+                            className: "w-full bg-white text-sky-900 font-bungee text-2xl py-4 rounded-2xl shadow-xl transform active:scale-95 transition-all",
+                            onClick: (e) => { e.stopPropagation(); startGame(); }
+                        }, "RETRY MISSION")
+                    )
+                )
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
     </script>
 </body>
 </html>
