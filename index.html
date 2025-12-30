@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sky Dodger - Aeroplane Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: Arial, sans-serif; }
+        #game-container { position: relative; width: 100vw; height: 100vh; background: linear-gradient(#1a2a6c, #b21f1f, #fdbb2d); }
+        #player { position: absolute; width: 60px; height: 30px; background: #fff; border-radius: 5px; transition: transform 0.1s; z-index: 10; }
+        /* Simple Airplane Shape */
+        #player::after { content: ''; position: absolute; width: 20px; height: 40px; background: #ddd; top: -5px; left: 20px; border-radius: 3px; }
+        .obstacle { position: absolute; border-radius: 5px; }
+        #score { position: absolute; top: 20px; left: 20px; color: white; font-size: 24px; font-weight: bold; }
+        #ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; }
+        button { padding: 10px 20px; font-size: 20px; cursor: pointer; background: #fff; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score">Score: 0</div>
+        <div id="player"></div>
+        <div id="ui">
+            <h1>SKY DODGER</h1>
+            <button onclick="startGame()">Start Flight</button>
+        </div>
+    </div>
+
+    <script>
+        const player = document.getElementById('player');
+        const container = document.getElementById('game-container');
+        const scoreElement = document.getElementById('score');
+        const ui = document.getElementById('ui');
+
+        let playerY = window.innerHeight / 2;
+        let score = 0;
+        let gameActive = false;
+        let obstacles = [];
+        let speed = 5;
+
+        // Move player with Mouse or Touch
+        window.addEventListener('mousemove', (e) => {
+            if(gameActive) playerY = e.clientY;
+        });
+
+        function startGame() {
+            score = 0;
+            obstacles.forEach(obs => obs.element.remove());
+            obstacles = [];
+            gameActive = true;
+            ui.style.display = 'none';
+            requestAnimationFrame(update);
+        }
+
+        function spawnObstacle() {
+            const types = [
+                { color: 'white', w: 80, h: 40, name: 'Cloud' },
+                { color: 'red', w: 30, h: 20, name: 'Bird' },
+                { color: 'purple', w: 40, h: 40, name: 'Satellite' }
+            ];
+            const type = types[Math.floor(Math.random() * types.length)];
+            const el = document.createElement('div');
+            el.className = 'obstacle';
+            el.style.backgroundColor = type.color;
+            el.style.width = type.w + 'px';
+            el.style.height = type.h + 'px';
+            
+            const startY = Math.random() * (window.innerHeight - 50);
+            container.appendChild(el);
+            obstacles.push({ element: el, x: window.innerWidth, y: startY, w: type.w, h: type.h });
+        }
+
+        let frame = 0;
+        function update() {
+            if(!gameActive) return;
+
+            // Player position
+            player.style.top = playerY + 'px';
+            player.style.left = '50px';
+
+            // Spawn obstacles
+            if(frame++ % 60 === 0) spawnObstacle();
+
+            // Move obstacles
+            obstacles.forEach((obs, index) => {
+                obs.x -= speed;
+                obs.element.style.left = obs.x + 'px';
+                obs.element.style.top = obs.y + 'px';
+
+                // Collision detection
+                if (obs.x < 110 && obs.x > 50 && 
+                    playerY < obs.y + obs.h && playerY + 30 > obs.y) {
+                    gameOver();
+                }
+
+                // Point scoring
+                if(obs.x < 0) {
+                    score++;
+                    scoreElement.innerText = `Score: ${score}`;
+                    obs.element.remove();
+                    obstacles.splice(index, 1);
+                }
+            });
+
+            requestAnimationFrame(update);
+        }
+
+        function gameOver() {
+            gameActive = false;
+            ui.style.display = 'block';
+            ui.innerHTML = `<h1>CRASHED!</h1><p>Final Score: ${score}</p><button onclick="startGame()">Try Again</button>`;
+        }
+    </script>
+</body>
+</html>
